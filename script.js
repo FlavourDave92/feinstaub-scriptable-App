@@ -421,7 +421,11 @@ function isoDate(offsetDays = 0) {
 
 function fmtTime(tsStr) {
   if (!tsStr) return "—"
-  const d = new Date(tsStr)
+  let normalized = tsStr.replace(" ", "T")
+  if (!/Z|[+-]\d{2}:\d{2}$/.test(normalized)) {
+    normalized += "Z"
+  }
+  const d = new Date(normalized)
   return d.toLocaleTimeString("de-DE", { hour: "2-digit", minute: "2-digit" }) +
          " · " + d.toLocaleDateString("de-DE", { day: "2-digit", month: "2-digit" })
 }
