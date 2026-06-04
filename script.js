@@ -74,15 +74,235 @@ async function main() {
     bme:  csvParse(bmeCsv,  ["temperature", "humidity", "pressure"])
   }
 
-  const wv = new WebView()
-  await wv.loadHTML(renderDashboard(current, history, archiveDate))
-  await wv.present(true)   // fullscreen on iPad; always fullscreen on iPhone
+  const widget = await createWidget(current, history, archiveDate)
+
+  if (config.runsInWidget) {
+    Script.setWidget(widget)
+  } else {
+    await presentExtendedDashboard(current, history, archiveDate)
+  }
+
   Script.complete()
 }
 
-// ═══════════════════════════════════════════════════════════════
+async function presentExtendedDashboard(cur, hist, archiveDate) {
+  const wv = new WebView()
+  await wv.loadHTML(renderDashboard(cur, hist, archiveDate))
+  await wv.present(true)
+}
+
+async function createWidget(cur, hist, archiveDate) {
+  const theme = DARK_MODE ? {
+    bg:      new Color("#0c0e1a"),
+    card:    new Color("#161928"),
+    text:    new Color("#dde0f0"),
+    muted:   new Color("#737b8d"),
+    pm25:    new Color("#26c281"),
+    pm10:    new Color("#eb4d4b"),
+    temp:    new Color("#ff9f43"),
+    hum:     new Color("#54a0ff"),
+    pres:    new Color("#a29bfe")
+  } : {
+    bg:      new Color("#f0f2f8"),
+    card:    new Color("#ffffff"),
+    text:    new Color("#1a1d2e"),
+    muted:   new Color("#6a7484"),
+    pm25:    new Color("#26c281"),
+    pm10:    new Color("#eb4d4b"),
+    temp:    new Color("#ff9f43"),
+    hum:     new Color("#54a0ff"),
+    pres:    new Color("#a29bfe")
+  }
+
+  const widget = new ListWidget()
+  widget.backgroundColor = theme.bg
+  widget.setPadding(12, 12, 12, 12)
+
+  const title = widget.addText(SENSOR_LABEL)
+  title.font = Font.semiboldSystemFont(16)
+  title.textColor = theme.text
+  title.lineLimit = 1
+
+  const subtitle = widget.addText(cur.ts ? fmtTime(cur.ts) : "No recent readings")
+  subtitle.font = Font.systemFont(10)
+  subtitle.textColor = theme.muted
+  subtitle.lineLimit = 1
+  subtitle.minimumScaleFactor = 0.8
+
+  widget.addSpacer(10)
+
+  const row = widget.addStack()
+  row.layoutHorizontally()
+  row.spacing = 8
+
+  const col1 = row.addStack()
+  col1.layoutVertically()
+  col1.spacing = 8
+
+  const col2 = row.addStack()
+  col2.layoutVertically()
+  col2.spacing = 8
+
+  addMetricCard(col1, "PM 2.5", f1(cur.pm25), "μg/m³", theme.pm25, theme)
+  addMetricCard(col1, "PM 10", f1(cur.pm10), "μg/m³", theme.pm10, theme)
+  addMetricCard(col1, "Status", aqText(cur.pm25, [5, 15, 25, 50]), "", theme.text, theme)
+
+  addMetricCard(col2, "Temp", f1(cur.temp), "°C", theme.temp, theme)
+  addMetricCard(col2, "Humidity", f0(cur.humidity), "%", theme.hum, theme)
+  addMetricCard(col2, "Pressure", f0(cur.pressure), "hPa", theme.pres, theme)
+
+  widget.addSpacer(8)
+  const chartImage = await createLineChartImage(hist.dust, [
+    { key: 'P2', color: theme.pm25 },
+    { key: 'P1', color: theme.pm10 }
+  ], {
+    width: 280,
+    height: 110,
+    yMin: 0,
+    title: 'Particulate Matter',
+    subtitle: '24 h course'
+  }, theme)
+
+  const chart = widget.addImage(chartImage)
+  chart.imageSize = new Size(280, 110)
+  chart.cornerRadius = 12
+  chart.leftAlignImage()
+
+  widget.addSpacer(8)
+  const footer = widget.addText(`Archive ${archiveDate}`)
+  footer.font = Font.systemFont(9)
+  footer.textColor = theme.muted
+  footer.lineLimit = 1
+  footer.minimumScaleFactor = 0.7
+
+  return widget
+}
+
+async function createLineChartImage(rows, series, opts, theme) {
+  opts = opts || {}
+  const width = opts.width || 280
+  const height = opts.height || 110
+  const ctx = new DrawContext()
+  ctx.size = new Size(width, height)
+  ctx.opaque = false
+  ctx.respectScreenScale = true
+
+  ctx.setFillColor(theme.card)
+  ctx.fillRect(new Rect(0, 0, width, height))
+
+  const PL = 32
+  const PR = 12
+  const PT = 14
+  const PB = 20
+  const plotW = width - PL - PR
+  const plotH = height - PT - PB
+
+  const validRows = rows.filter(r => r && typeof r.t === 'number')
+  if (validRows.length < 2) {
+    ctx.setFillColor(theme.muted)
+    ctx.setFont(Font.systemFont(12))
+    ctx.drawText(`No archive data`, new Point(8, height / 2 - 6))
+    return ctx.getImage()
+  }
+
+  const tMin = validRows[0].t
+  const tMax = validRows[validRows.length - 1].t
+  const tSpan = tMax - tMin || 1
+
+  const allVals = []
+  for (const row of validRows) {
+    for (const s of series) {
+      const v = row[s.key]
+      if (v != null && isFinite(v)) allVals.push(v)
+    }
+  }
+
+  const rawMin = Math.min.apply(null, allVals)
+  const rawMax = Math.max.apply(null, allVals)
+  const pad = Math.max((rawMax - rawMin) * 0.12, 1)
+  const vMin = typeof opts.yMin === 'number' ? opts.yMin : rawMin - pad * 0.4
+  const vMax = typeof opts.yMax === 'number' ? opts.yMax : rawMax + pad
+
+  const xp = t => PL + ((t - tMin) / tSpan) * plotW
+  const yp = v => PT + (1 - (v - vMin) / (vMax - vMin)) * plotH
+
+  ctx.setStrokeColor(theme.muted)
+  ctx.setLineWidth(0.5)
+  for (let i = 0; i <= 4; i++) {
+    const y = PT + (plotH * i / 4)
+    const path = new Path()
+    path.move(new Point(PL, y))
+    path.addLine(new Point(PL + plotW, y))
+    ctx.addPath(path)
+    ctx.strokePath(path)
+  }
+
+  for (const s of series) {
+    const path = new Path()
+    let started = false
+    for (const row of validRows) {
+      const value = row[s.key]
+      if (value == null || !isFinite(value)) continue
+      const x = xp(row.t)
+      const y = yp(value)
+      if (!started) {
+        path.move(new Point(x, y))
+        started = true
+      } else {
+        path.addLine(new Point(x, y))
+      }
+    }
+    if (!started) continue
+    ctx.setStrokeColor(s.color)
+    ctx.setLineWidth(2)
+    ctx.addPath(path)
+    ctx.strokePath(path)
+  }
+
+  if (opts.title) {
+    ctx.setFont(Font.semiboldSystemFont(11))
+    ctx.setTextColor(theme.text)
+    ctx.drawText(opts.title, new Point(PL, 0))
+  }
+  if (opts.subtitle) {
+    ctx.setFont(Font.systemFont(9))
+    ctx.setTextColor(theme.muted)
+    ctx.drawText(opts.subtitle, new Point(PL, 12))
+  }
+
+  return ctx.getImage()
+}
+
+function addMetricCard(parent, label, value, unit, accent, theme) {
+  const card = parent.addStack()
+  card.layoutVertically()
+  card.setPadding(10, 10, 10, 10)
+  card.backgroundColor = theme.card
+  card.cornerRadius = 12
+  card.url = "https://maps.sensor.community/"
+
+  const labelText = card.addText(label)
+  labelText.font = Font.systemFont(10)
+  labelText.textColor = theme.muted
+  labelText.lineLimit = 1
+  labelText.minimumScaleFactor = 0.75
+
+  const valueText = card.addText(`${value}${unit ? ` ${unit}` : ""}`)
+  valueText.font = Font.semiboldSystemFont(18)
+  valueText.textColor = colorFrom(accent)
+  valueText.lineLimit = 1
+  valueText.minimumScaleFactor = 0.7
+
+  return card
+}
+
+function colorFrom(value) {
+  return value instanceof Color ? value : new Color(value)
+}
+
+// ═══════════════════════════════════════════════════════════════════════
 //  NETWORK HELPERS
-// ═══════════════════════════════════════════════════════════════
+// ═══════════════════════════════════════════════════════
 async function apiGet(url) {
   try {
     const r = new Request(url)
