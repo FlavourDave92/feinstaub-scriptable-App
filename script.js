@@ -301,7 +301,6 @@ function addMetricCard(parent, label, value, unit, accent, theme, width, height)
   card.backgroundColor = theme.card
   card.cornerRadius = 12
   card.centerAlignContent()
-  card.url = "https://maps.sensor.community/"
 
   const labelText = card.addText(label)
   labelText.font = Font.systemFont(10)
