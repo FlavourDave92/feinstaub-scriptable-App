@@ -116,57 +116,77 @@ async function createWidget(cur, hist, archiveDate) {
 
   const widget = new ListWidget()
   widget.backgroundColor = theme.bg
-  widget.setPadding(12, 12, 12, 12)
+  widget.setPadding(8, 8, 8, 8)
 
   const title = widget.addText(SENSOR_LABEL)
   title.font = Font.semiboldSystemFont(16)
   title.textColor = theme.text
   title.lineLimit = 1
+  title.minimumScaleFactor = 0.8
 
   const subtitle = widget.addText(cur.ts ? fmtTime(cur.ts) : "No recent readings")
-  subtitle.font = Font.systemFont(10)
+  subtitle.font = Font.systemFont(9)
   subtitle.textColor = theme.muted
   subtitle.lineLimit = 1
-  subtitle.minimumScaleFactor = 0.8
+  subtitle.minimumScaleFactor = 0.7
 
-  widget.addSpacer(10)
+  widget.addSpacer(5)
 
-  const row = widget.addStack()
-  row.layoutHorizontally()
-  row.spacing = 8
+  const cardWidth = 150
+  const cardHeight = 62
 
-  const col1 = row.addStack()
-  col1.layoutVertically()
-  col1.spacing = 8
+  const row1 = widget.addStack()
+  row1.layoutHorizontally()
+  row1.centerAlignContent()
+  row1.spacing = 6
+  row1.addSpacer()
+  addMetricCard(row1, "PM 2.5", f1(cur.pm25), "μg/m³", theme.pm25, theme, cardWidth, cardHeight)
+  addMetricCard(row1, "PM 10", f1(cur.pm10), "μg/m³", theme.pm10, theme, cardWidth, cardHeight)
+  row1.addSpacer()
 
-  const col2 = row.addStack()
-  col2.layoutVertically()
-  col2.spacing = 8
+  widget.addSpacer(5)
 
-  addMetricCard(col1, "PM 2.5", f1(cur.pm25), "μg/m³", theme.pm25, theme)
-  addMetricCard(col1, "PM 10", f1(cur.pm10), "μg/m³", theme.pm10, theme)
-  addMetricCard(col1, "Status", aqText(cur.pm25, [5, 15, 25, 50]), "", theme.text, theme)
+  const row2 = widget.addStack()
+  row2.layoutHorizontally()
+  row2.centerAlignContent()
+  row2.spacing = 6
+  row2.addSpacer()
+  addMetricCard(row2, "Temp", f1(cur.temp), "°C", theme.temp, theme, cardWidth, cardHeight)
+  addMetricCard(row2, "Humidity", f0(cur.humidity), "%", theme.hum, theme, cardWidth, cardHeight)
+  row2.addSpacer()
 
-  addMetricCard(col2, "Temp", f1(cur.temp), "°C", theme.temp, theme)
-  addMetricCard(col2, "Humidity", f0(cur.humidity), "%", theme.hum, theme)
-  addMetricCard(col2, "Pressure", f0(cur.pressure), "hPa", theme.pres, theme)
+  widget.addSpacer(5)
+
+  const row3 = widget.addStack()
+  row3.layoutHorizontally()
+  row3.centerAlignContent()
+  row3.spacing = 6
+  row3.addSpacer()
+  addMetricCard(row3, "Status", aqText(cur.pm25, [5, 15, 25, 50]), "", theme.text, theme, cardWidth, 62)
+  addMetricCard(row3, "Pressure", f0(cur.pressure), "hPa", theme.pres, theme, cardWidth, 62)
+  row3.addSpacer()
 
   widget.addSpacer(8)
+  const chartWidth = 310
   const chartImage = await createLineChartImage(hist.dust, [
     { key: 'P2', color: theme.pm25 },
     { key: 'P1', color: theme.pm10 }
   ], {
-    width: 280,
-    height: 110,
+    width: chartWidth,
+    height: 96,
     yMin: 0,
     title: 'Particulate Matter',
     subtitle: '24 h course'
   }, theme)
 
-  const chart = widget.addImage(chartImage)
-  chart.imageSize = new Size(280, 110)
+  const chartStack = widget.addStack()
+  chartStack.layoutHorizontally()
+  chartStack.centerAlignContent()
+  chartStack.addSpacer()
+  const chart = chartStack.addImage(chartImage)
+  chart.imageSize = new Size(chartWidth, 96)
   chart.cornerRadius = 12
-  chart.leftAlignImage()
+  chartStack.addSpacer()
 
   widget.addSpacer(8)
   const footer = widget.addText(`Archive ${archiveDate}`)
@@ -273,12 +293,14 @@ async function createLineChartImage(rows, series, opts, theme) {
   return ctx.getImage()
 }
 
-function addMetricCard(parent, label, value, unit, accent, theme) {
+function addMetricCard(parent, label, value, unit, accent, theme, width, height) {
   const card = parent.addStack()
   card.layoutVertically()
+  if (width || height) card.size = new Size(width || 0, height || 74)
   card.setPadding(10, 10, 10, 10)
   card.backgroundColor = theme.card
   card.cornerRadius = 12
+  card.centerAlignContent()
   card.url = "https://maps.sensor.community/"
 
   const labelText = card.addText(label)
